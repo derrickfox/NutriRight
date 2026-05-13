@@ -1,5 +1,14 @@
 import { useState, useEffect, useRef } from 'react';
 
+const PODIUM_COLORS = [
+  'var(--pod-0)',
+  'var(--pod-1)',
+  'var(--pod-2)',
+  'var(--pod-3)',
+  'var(--pod-4)',
+  'var(--pod-5)',
+];
+
 export default function GameScreen({
   roundData,
   localPlayerId,
@@ -57,18 +66,23 @@ export default function GameScreen({
 
   return (
     <div className="game-screen">
-      <div className="game-header">
-        <div className="round-badge">Bidding Round {round}</div>
-        {currentBidder && (
-          <div className={`timer-display ${timerClass}`}>
-            <span className="timer-value">{timeLeft}</span>
-            <span className="timer-unit">sec</span>
+
+      {/* ── Stage header: marquee banner + timer ── */}
+      <div className="show-stage-header">
+        <div className="show-banner">
+          <span className="show-round-title">Bidding Round {round}</span>
+        </div>
+
+        {currentBidder && timeLeft !== null && (
+          <div className={`show-timer ${timerClass}`}>
+            <span className="show-timer-value">{timeLeft}</span>
+            <span className="show-timer-unit">sec</span>
           </div>
         )}
       </div>
 
-      <div className="game-body">
-        {/* Product */}
+      {/* ── Product + question ── */}
+      <div className="show-product-stage">
         <div className="product-card card">
           <div className="product-image-wrap">
             <img
@@ -87,46 +101,56 @@ export default function GameScreen({
           </div>
         </div>
 
-        {/* Question */}
         <div className="question-card card">
           <p className="question-label">THE QUESTION</p>
           <h3 className="question-text">{question.text}</h3>
         </div>
+      </div>
 
-        {/* Live bid board */}
-        <div className="bid-board card">
-          <p className="question-label">BIDS</p>
-          {biddingOrder.map(({ id, username }, idx) => {
-            const bid = bidMap.get(id);
-            const isCurrent = currentBidder?.id === id;
-            const isMe = id === localPlayerId;
+      {/* ── Contestant podiums ── */}
+      <div className="podiums-row">
+        {biddingOrder.map(({ id, username }, idx) => {
+          const bid = bidMap.get(id);
+          const isCurrent = currentBidder?.id === id;
+          const isMe = id === localPlayerId;
 
-            let rowClass = 'bid-row';
-            if (bid) rowClass += ' bid-row-done';
-            else if (isCurrent) rowClass += ' bid-row-active';
+          let podiumClass = 'podium';
+          if (bid) podiumClass += ' podium-done';
+          else if (isCurrent) podiumClass += ' podium-active';
 
-            return (
-              <div key={id} className={rowClass}>
-                <span className="bid-order-num">#{idx + 1}</span>
-                <span className="bid-player-name">
-                  {username}{isMe ? ' (you)' : ''}
+          return (
+            <div
+              key={id}
+              className={podiumClass}
+              style={{ '--podium-color': PODIUM_COLORS[idx % PODIUM_COLORS.length] }}
+            >
+              {/* Name band */}
+              <div className="podium-name-band">
+                <span className="podium-name-text">
+                  {username}{isMe ? ' ★' : ''}
                 </span>
+              </div>
 
+              {/* Display area */}
+              <div className="podium-display">
                 {bid ? (
-                  // Bid already placed — show it
-                  <span className="bid-value">
-                    {bid.timedOut
-                      ? <span className="bid-timed-out">⏱ no bid</span>
-                      : <><strong>{bid.guess}</strong> {question.unit}</>}
-                  </span>
+                  // Bid placed — show value
+                  bid.timedOut ? (
+                    <span className="podium-bid-value timed-out">⏱ no bid</span>
+                  ) : (
+                    <>
+                      <span className="podium-bid-value">{bid.guess}</span>
+                      <span className="podium-unit">{question.unit}</span>
+                    </>
+                  )
                 ) : isCurrent ? (
                   isMe && !hasSubmitted ? (
-                    // It's my turn — show inline input
-                    <form onSubmit={handleSubmit} className="bid-inline-form">
+                    // My turn — show input form
+                    <form onSubmit={handleSubmit} className="podium-form">
                       <input
                         ref={inputRef}
                         type="number"
-                        className="text-input bid-input"
+                        className="podium-input"
                         placeholder={question.hint}
                         value={guess}
                         onChange={(e) => setGuess(e.target.value)}
@@ -134,28 +158,27 @@ export default function GameScreen({
                         step="any"
                         disabled={timeLeft === 0}
                       />
-                      <span className="unit-label">{question.unit}</span>
+                      <span className="podium-unit-hint">{question.unit}</span>
                       <button
                         type="submit"
-                        className="btn btn-primary bid-submit-btn"
+                        className="podium-bid-btn"
                         disabled={!guess || timeLeft === 0}
                       >
-                        {timeLeft === 0 ? "Time's Up" : 'Bid!'}
+                        {timeLeft === 0 ? "⏱" : 'Bid!'}
                       </button>
                     </form>
                   ) : (
-                    // Someone else's turn, or I already submitted (brief in-between state)
-                    <span className="bid-status bidding">
-                      {isMe && hasSubmitted ? '✓ locked in' : '🎙 bidding…'}
+                    <span className="podium-bidding-text">
+                      {isMe && hasSubmitted ? '✓ locked' : '🎙 bidding…'}
                     </span>
                   )
                 ) : (
-                  <span className="bid-status waiting">—</span>
+                  <span className="podium-waiting-dash">—</span>
                 )}
               </div>
-            );
-          })}
-        </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

@@ -1,7 +1,7 @@
 import express from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
-import { fetchRandomProduct, fetchMiniGameProducts } from './foodApi.js';
+import { fetchRandomProduct } from './foodApi.js';
 import { GameManager } from './gameManager.js';
 import { CliffHangersGame } from './cliffHangers.js';
 
@@ -17,6 +17,41 @@ const io = new Server(httpServer, {
 
 const game = new GameManager();
 let cliffGame = null;
+
+// ── Product pre-fetch queue ────────────────────────────────────
+// Keeps products ready so round starts are instant instead of
+// making players wait for the Open Food Facts API.
+const productQueue = [];
+const QUEUE_TARGET = 5; // keep 5 products warm at all times
+let queueRefilling = false;
+
+async function refillQueue() {
+  if (queueRefilling) return;
+  queueRefilling = true;
+  while (productQueue.length < QUEUE_TARGET) {
+    try {
+      const item = await fetchRandomProduct();
+      productQueue.push(item);
+      console.log(`[queue] +1 product (${productQueue.length}/${QUEUE_TARGET})`);
+    } catch (err) {
+      console.warn('[queue] pre-fetch failed:', err.message);
+      // Brief pause before retrying so we don't hammer the API
+      await new Promise((r) => setTimeout(r, 4000));
+    }
+  }
+  queueRefilling = false;
+}
+
+// Pull from the queue if available, fire-and-forget refill, fall back to direct fetch
+async function getNextProduct() {
+  if (productQueue.length > 0) {
+    const item = productQueue.shift();
+    refillQueue(); // replenish in background — intentionally not awaited
+    return item;
+  }
+  console.warn('[queue] empty — fetching directly');
+  return fetchRandomProduct();
+}
 
 io.on('connection', (socket) => {
   console.log(`[connect] ${socket.id}`);
@@ -183,7 +218,7 @@ io.on('connection', (socket) => {
 async function startNewRound() {
   io.emit('round_loading');
   try {
-    const { product, question } = await fetchRandomProduct();
+    const { product, question } = await getNextProduct();
     game.startRound(product, question);
 
     io.emit('round_start', {
@@ -250,7 +285,8 @@ function revealRound() {
 async function startCliffHangers() {
   io.emit('cliff_loading');
   try {
-    const products = await fetchMiniGameProducts(3);
+    const products = [];
+    for (let i = 0; i < 3; i++) products.push(await getNextProduct());
     cliffGame = new CliffHangersGame(
       game.lastWinnerId,
       game.lastWinnerUsername,
@@ -277,4 +313,6 @@ async function startCliffHangers() {
 const PORT = process.env.PORT || 3002;
 httpServer.listen(PORT, () => {
   console.log(`NutriRight server → http://localhost:${PORT}`);
+  // Start warming the product queue immediately so the first round is instant
+  refillQueue();
 });
