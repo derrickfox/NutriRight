@@ -7,25 +7,37 @@ const SLOTS = 9;
 // ── SVG layout ────────────────────────────────────────────────────────────────
 const SVG_W = 450;
 const SVG_H = 530;
-const COL_W = SVG_W / SLOTS; // 50
+const COL_W   = SVG_W / SLOTS;   // 50
 const ROW_SPACING = 40;
-const PEG_Y0 = 110;        // y of first peg row
-const DROP_Y = 52;          // y of drop zone circles
-const SLOT_Y = PEG_Y0 + ROWS * ROW_SPACING + 12; // y of prize slot tops
-const SLOT_H = 55;
-const CHIP_R = 13;
+const PEG_Y0  = 110;              // y of first peg row
+const DROP_Y  = 52;               // y of drop-zone indicators
+const SLOT_Y  = PEG_Y0 + ROWS * ROW_SPACING + 12;
+const SLOT_H  = 55;
+const CHIP_R  = 13;
 
-const STEP_DELAY_MS = 290;  // time between animation steps
+// ── Physics ───────────────────────────────────────────────────────────────────
+// 9 segment durations (ms).  Segments map to path indices:
+//   seg 0 : drop-zone  → peg row 0    (fast initial drop)
+//   seg 1 : peg row 0  → peg row 1 }
+//       …                           }  gravity-accelerated
+//   seg 7 : peg row 6  → peg row 7 }
+//   seg 8 : peg row 7  → prize slot  (slower settle)
+const SEG_MS = [210, 300, 258, 222, 190, 163, 140, 120, 440];
 
-function colX(col) {
-  return col * COL_W + COL_W / 2;
-}
+// Cumulative start time for each segment, plus the total duration at index 9
+const SEG_START = (() => {
+  const a = [0];
+  SEG_MS.forEach((d, i) => a.push(a[i] + d));
+  return a;   // [0, 210, 510, 768, 990, 1180, 1343, 1483, 1603, 2043]
+})();
+const TOTAL_MS = SEG_START[SEG_MS.length];
 
-function getChipY(step) {
-  if (step === 0) return DROP_Y;
-  if (step >= ROWS) return SLOT_Y + SLOT_H / 2; // landed
-  return PEG_Y0 + (step - 1) * ROW_SPACING + ROW_SPACING / 2;
-}
+// Upward micro-bounce (px) injected at the start of each peg-impact segment.
+// Segs 0 and 8 are not peg impacts.
+const SEG_BOUNCE = [0, 14, 12, 10, 8, 7, 5, 4, 0];
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function colX(col) { return col * COL_W + COL_W / 2; }
 
 function slotColor(val) {
   if (val >= 5000) return '#FFD700';
@@ -39,16 +51,87 @@ function formatVal(v) {
   return v >= 1000 ? `${v / 1000}K` : String(v);
 }
 
+// Build 10 waypoints from the 9-element chip path.
+//   wp[0]   = drop zone
+//   wp[1–8] = at each peg-row level  (path[1..8])
+//   wp[9]   = inside the prize slot  (same x as wp[8])
+function buildWaypoints(path) {
+  const pts = [{ x: colX(path[0]), y: DROP_Y }];
+  for (let i = 1; i <= ROWS; i++) {
+    pts.push({ x: colX(path[i]), y: PEG_Y0 + (i - 1) * ROW_SPACING });
+  }
+  pts.push({ x: colX(path[ROWS]), y: SLOT_Y + SLOT_H / 2 });
+  return pts;   // 10 points, 9 segments
+}
+
+// Compute chip render state at `elapsed` ms into the animation.
+function sampleChip(elapsed, waypoints) {
+  if (elapsed >= TOTAL_MS) {
+    const last = waypoints[waypoints.length - 1];
+    return { x: last.x, y: last.y, scaleX: 1, scaleY: 1, landed: true };
+  }
+
+  // Locate current segment
+  let seg = SEG_MS.length - 1;
+  for (let i = 0; i < SEG_MS.length; i++) {
+    if (elapsed < SEG_START[i + 1]) { seg = i; break; }
+  }
+
+  const t = (elapsed - SEG_START[seg]) / SEG_MS[seg]; // 0 → 1 within segment
+  const wp0 = waypoints[seg];
+  const wp1 = waypoints[seg + 1];
+
+  // ── X : linear ──────────────────────────────────────────────────────────────
+  const x = wp0.x + (wp1.x - wp0.x) * t;
+
+  // ── Y : ease-in (gravity) everywhere except the landing segment ─────────────
+  const isLanding = seg === SEG_MS.length - 1;
+  const ty = isLanding
+    ? 1 - (1 - t) ** 2            // ease-out: chip decelerates into the slot
+    : t * t;                       // ease-in:  gravity pulls it faster each row
+  let y = wp0.y + (wp1.y - wp0.y) * ty;
+
+  // ── Micro-bounce : brief upward blip after each peg deflection ──────────────
+  const bh = SEG_BOUNCE[seg];
+  if (bh > 0) {
+    // Bell-shaped lift that peaks around t≈0.15 and fades by t≈0.5
+    const bumpT = Math.min(t / 0.50, 1);
+    y -= bh * Math.sin(Math.PI * bumpT) * (1 - bumpT * 0.4);
+  }
+
+  // ── Scale : squish deformation on peg impact (segs 1–7, first 30%) ─────────
+  let scaleX = 1;
+  let scaleY = 1;
+  const isPegSeg = seg >= 1 && seg <= SEG_MS.length - 2;
+  if (isPegSeg && t < 0.30) {
+    const s      = t / 0.30;
+    const squish = Math.sin(Math.PI * s);   // 0 → peak → 0 bell
+    scaleX = 1 + 0.45 * squish;
+    scaleY = 1 - 0.32 * squish;
+  }
+
+  // ── Landing settle : slight flatten as chip drops into slot ─────────────────
+  if (isLanding && t > 0.70) {
+    const s      = (t - 0.70) / 0.30;
+    const squish = 4 * s * (1 - s);         // bell, peaks at s=0.5
+    scaleX = 1 + 0.28 * squish;
+    scaleY = 1 - 0.20 * squish;
+  }
+
+  return { x, y, scaleX, scaleY, landed: false };
+}
+
 // ── Plinko SVG board ──────────────────────────────────────────────────────────
 function Board({
   slotValues,
   droppedChips,
-  currentChip,
-  animStep,
+  chipPos,
+  chipLanded,
   hoveredCol,
   onHoverCol,
   onDropCol,
   canDrop,
+  pegRefsArr,
 }) {
   // Pegs: at boundary between each pair of adjacent columns, for each row
   const pegs = [];
@@ -57,11 +140,6 @@ function Board({
       pegs.push({ x: (gap + 1) * COL_W, y: PEG_Y0 + row * ROW_SPACING });
     }
   }
-
-  // Chip position
-  const chipX = currentChip && animStep !== null ? colX(currentChip.path[Math.min(animStep, ROWS)]) : null;
-  const chipY = animStep !== null ? getChipY(animStep) : null;
-  const chipLanded = animStep !== null && animStep >= ROWS;
 
   return (
     <svg
@@ -92,13 +170,13 @@ function Board({
           </feMerge>
         </filter>
         <radialGradient id="chip-grad" cx="35%" cy="30%" r="65%">
-          <stop offset="0%" stopColor="#fff" stopOpacity="0.95" />
-          <stop offset="60%" stopColor="#FFD700" />
+          <stop offset="0%"   stopColor="#fff"     stopOpacity="0.95" />
+          <stop offset="60%"  stopColor="#FFD700" />
           <stop offset="100%" stopColor="#FF8C00" />
         </radialGradient>
         <radialGradient id="chip-land-grad" cx="35%" cy="30%" r="65%">
-          <stop offset="0%" stopColor="#fff" stopOpacity="0.98" />
-          <stop offset="50%" stopColor="#FFD700" />
+          <stop offset="0%"   stopColor="#fff"     stopOpacity="0.98" />
+          <stop offset="50%"  stopColor="#FFD700" />
           <stop offset="100%" stopColor="#FF1E8C" />
         </radialGradient>
       </defs>
@@ -147,17 +225,20 @@ function Board({
 
       {/* ── Pegs ── */}
       {pegs.map(({ x, y }, i) => (
-        <circle key={i} cx={x} cy={y} r="5"
+        <circle
+          key={i}
+          ref={el => { pegRefsArr.current[i] = el; }}
+          cx={x} cy={y} r="5"
           fill="#a78bfa"
           filter="url(#peg-glow)"
           opacity="0.88"
+          style={{ transition: 'fill 0.15s, r 0.15s' }}
         />
       ))}
 
       {/* ── Prize slots (bottom) ── */}
       {slotValues.map((val, i) => {
-        const color = slotColor(val);
-        // Has a chip landed here?
+        const color    = slotColor(val);
         const landCount = droppedChips.filter(c => c.landingSlot === i).length;
         return (
           <g key={i}>
@@ -181,7 +262,6 @@ function Board({
             >
               {formatVal(val)}
             </text>
-            {/* Landing dot(s) */}
             {landCount > 0 && Array.from({ length: landCount }, (_, k) => (
               <circle
                 key={k}
@@ -197,12 +277,9 @@ function Board({
       })}
 
       {/* ── Animated chip ── */}
-      {currentChip && animStep !== null && chipX !== null && (
+      {chipPos && (
         <g
-          style={{
-            transform: `translate(${chipX}px, ${chipY}px)`,
-            transition: `transform ${STEP_DELAY_MS}ms cubic-bezier(0.4, 0, 0.6, 1)`,
-          }}
+          transform={`translate(${chipPos.x}, ${chipPos.y}) scale(${chipPos.scaleX}, ${chipPos.scaleY})`}
           filter="url(#chip-glow)"
         >
           <circle
@@ -233,45 +310,100 @@ export default function Plinko({
 }) {
   const isWinner = localPlayerId === startData.winnerId;
 
-  const [animStep, setAnimStep] = useState(null);
+  const [chipPos,    setChipPos]    = useState(null);
+  const [chipLanded, setChipLanded] = useState(false);
   const [isAnimating, setIsAnimating] = useState(false);
-  const [hoveredCol, setHoveredCol] = useState(null);
+  const [hoveredCol,  setHoveredCol]  = useState(null);
   const [droppedChips, setDroppedChips] = useState([]);
-  const [lastPoints, setLastPoints] = useState(null);
-  const [totalPoints, setTotalPoints] = useState(0);
-  const [chipsLeft, setChipsLeft] = useState(startData.totalChips);
+  const [lastPoints,   setLastPoints]   = useState(null);
+  const [totalPoints,  setTotalPoints]  = useState(0);
+  const [chipsLeft,    setChipsLeft]    = useState(startData.totalChips);
 
-  const timerRefs = useRef([]);
+  // RAF handle and per-animation state stored in refs (no re-renders)
+  const rafRef          = useRef(null);
+  const startTimeRef    = useRef(null);
+  const waypointsRef    = useRef(null);
+  const pegRefsArr      = useRef([]);       // populated by Board via ref callbacks
+  const lastFlashedSeg  = useRef(-1);       // prevents double-flashing same peg
 
-  // Animate chip when a new one arrives from server
+  // ── Physics animation ─────────────────────────────────────────────────────
   useEffect(() => {
     if (!currentChip) return;
 
-    // Clear any previous timers
-    timerRefs.current.forEach(clearTimeout);
-    timerRefs.current = [];
+    // Cancel any in-progress animation
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
 
-    setAnimStep(0);
+    const waypoints = buildWaypoints(currentChip.path);
+    waypointsRef.current = waypoints;
+    lastFlashedSeg.current = -1;
+
+    setChipLanded(false);
     setIsAnimating(true);
+    // Snap chip to starting position immediately so it's visible before physics starts
+    setChipPos({ x: waypoints[0].x, y: waypoints[0].y, scaleX: 1, scaleY: 1 });
 
-    // Schedule each step
-    for (let step = 1; step <= ROWS; step++) {
-      const t = setTimeout(() => {
-        setAnimStep(step);
-        if (step >= ROWS) {
-          // Chip has landed
-          setIsAnimating(false);
-          setDroppedChips((prev) => [...prev, currentChip]);
-          setLastPoints(currentChip.points);
-          setTotalPoints(currentChip.totalPoints);
-          setChipsLeft(currentChip.chipsRemaining);
+    function frame(now) {
+      if (startTimeRef.current === null) startTimeRef.current = now;
+      const elapsed = now - startTimeRef.current;
+
+      // ── Peg flash via direct DOM manipulation (avoids React re-renders) ─────
+      // Find which segment we're in to detect the moment of peg impact
+      let seg = SEG_MS.length - 1;
+      for (let i = 0; i < SEG_MS.length; i++) {
+        if (elapsed < SEG_START[i + 1]) { seg = i; break; }
+      }
+      const t = (elapsed - SEG_START[seg]) / SEG_MS[seg];
+
+      if (seg >= 1 && seg <= 7 && t < 0.12 && seg !== lastFlashedSeg.current) {
+        lastFlashedSeg.current = seg;
+        const pegRow = seg - 1;
+        const pegGap = Math.min(
+          currentChip.path[seg - 1],
+          currentChip.path[seg],
+        );
+        const pegIndex = pegRow * (SLOTS - 1) + pegGap;
+        const el = pegRefsArr.current[pegIndex];
+        if (el) {
+          el.setAttribute('fill', '#ffffff');
+          el.setAttribute('r', '7');
+          el.setAttribute('opacity', '1');
+          setTimeout(() => {
+            if (el) {
+              el.setAttribute('fill', '#a78bfa');
+              el.setAttribute('r', '5');
+              el.setAttribute('opacity', '0.88');
+            }
+          }, 220);
         }
-      }, step * STEP_DELAY_MS);
-      timerRefs.current.push(t);
+      }
+
+      // ── Sample physics position ──────────────────────────────────────────
+      const pos = sampleChip(elapsed, waypoints);
+      setChipPos(pos);
+
+      if (pos.landed) {
+        // Animation complete — update score display and chip indicators
+        setChipLanded(true);
+        setIsAnimating(false);
+        setDroppedChips(prev => [...prev, currentChip]);
+        setLastPoints(currentChip.points);
+        setTotalPoints(currentChip.totalPoints);
+        setChipsLeft(currentChip.chipsRemaining);
+        startTimeRef.current = null;
+        return; // don't schedule next frame
+      }
+
+      rafRef.current = requestAnimationFrame(frame);
     }
 
-    return () => timerRefs.current.forEach(clearTimeout);
-    // chipsRemaining decrements uniquely per drop (2→1→0), so this fires exactly once per chip
+    startTimeRef.current = null;
+    rafRef.current = requestAnimationFrame(frame);
+
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      startTimeRef.current = null;
+    };
+    // chipsRemaining decrements uniquely per drop (2→1→0), fires exactly once per chip
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentChip?.chipsRemaining]);
 
@@ -283,7 +415,6 @@ export default function Plinko({
 
   const { slotValues } = startData;
 
-  // Chip indicators (filled / empty circles)
   const chipIndicators = Array.from({ length: startData.totalChips }, (_, i) => {
     const dropped = startData.totalChips - chipsLeft;
     return i < dropped ? 'used' : 'ready';
@@ -313,12 +444,13 @@ export default function Plinko({
           <Board
             slotValues={slotValues}
             droppedChips={droppedChips}
-            currentChip={currentChip}
-            animStep={animStep}
+            chipPos={chipPos}
+            chipLanded={chipLanded}
             hoveredCol={hoveredCol}
             onHoverCol={setHoveredCol}
             onDropCol={handleDropCol}
             canDrop={isWinner && !isAnimating && !complete && chipsLeft > 0}
+            pegRefsArr={pegRefsArr}
           />
         </div>
 
@@ -332,7 +464,9 @@ export default function Plinko({
             ))}
           </div>
           <p className="plinko-chips-label">
-            {chipsLeft > 0 ? `${chipsLeft} chip${chipsLeft !== 1 ? 's' : ''} left` : 'All chips dropped!'}
+            {chipsLeft > 0
+              ? `${chipsLeft} chip${chipsLeft !== 1 ? 's' : ''} left`
+              : 'All chips dropped!'}
           </p>
 
           {/* Running score */}
