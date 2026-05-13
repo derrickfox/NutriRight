@@ -6,6 +6,7 @@ import GameScreen from './components/GameScreen';
 import RoundReveal from './components/RoundReveal';
 import GameOver from './components/GameOver';
 import CliffHangers from './components/CliffHangers';
+import Plinko from './components/Plinko';
 
 export default function App() {
   const [screen, setScreen] = useState('landing');
@@ -32,6 +33,12 @@ export default function App() {
   const [cliffHasContinued, setCliffHasContinued] = useState(false);
   // Cumulative step count — persists when result clears between questions
   const [cliffTotalSteps, setCliffTotalSteps] = useState(0);
+
+  // Plinko state
+  const [plinkoStart, setPlinkoStart] = useState(null);
+  const [plinkoChip, setPlinkoChip] = useState(null);
+  const [plinkoComplete, setPlinkoComplete] = useState(null);
+  const [plinkoHasContinued, setPlinkoHasContinued] = useState(false);
 
   useEffect(() => {
     socket.connect();
@@ -99,6 +106,7 @@ export default function App() {
       setRevealData(null);
       setGameOverData(null);
       resetCliff();
+      resetPlinko();
       setScreen('lobby');
     });
 
@@ -132,6 +140,27 @@ export default function App() {
       setIsLoading(true);
     });
 
+    // ── Plinko events ─────────────────────────────────────────────
+    socket.on('plinko_start', (data) => {
+      resetPlinko();
+      setPlinkoStart(data);
+      setIsLoading(false);
+      setScreen('plinko');
+    });
+
+    socket.on('plinko_chip', (data) => {
+      setPlinkoChip(data);
+    });
+
+    socket.on('plinko_complete', (data) => {
+      setPlinkoComplete(data);
+    });
+
+    socket.on('plinko_skip', () => {
+      resetPlinko();
+      setIsLoading(true);
+    });
+
     return () => socket.disconnect();
   }, []);
 
@@ -142,6 +171,13 @@ export default function App() {
     setCliffComplete(null);
     setCliffHasContinued(false);
     setCliffTotalSteps(0);
+  }
+
+  function resetPlinko() {
+    setPlinkoStart(null);
+    setPlinkoChip(null);
+    setPlinkoComplete(null);
+    setPlinkoHasContinued(false);
   }
 
   const handleJoin = useCallback((username) => {
@@ -176,6 +212,15 @@ export default function App() {
 
   const handleEndShow = useCallback(() => {
     socket.emit('end_show');
+  }, []);
+
+  const handlePlinkoDrop = useCallback((startCol) => {
+    socket.emit('plinko_drop', { startCol });
+  }, []);
+
+  const handlePlinkoContinue = useCallback(() => {
+    socket.emit('plinko_continue');
+    setPlinkoHasContinued(true);
   }, []);
 
   if (!connected && screen !== 'landing') {
@@ -253,6 +298,17 @@ export default function App() {
           hasContinued={cliffHasContinued}
           onSubmit={handleCliffSubmit}
           onContinue={handleCliffContinue}
+        />
+      )}
+      {screen === 'plinko' && plinkoStart && (
+        <Plinko
+          startData={plinkoStart}
+          currentChip={plinkoChip}
+          complete={plinkoComplete}
+          hasContinued={plinkoHasContinued}
+          localPlayerId={localPlayer?.id}
+          onDrop={handlePlinkoDrop}
+          onContinue={handlePlinkoContinue}
         />
       )}
       {screen === 'gameover' && gameOverData && (

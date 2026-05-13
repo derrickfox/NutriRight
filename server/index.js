@@ -4,6 +4,7 @@ import { Server } from 'socket.io';
 import { fetchRandomProduct } from './foodApi.js';
 import { GameManager } from './gameManager.js';
 import { CliffHangersGame } from './cliffHangers.js';
+import { PlinkoGame, SLOT_VALUES } from './plinkoGame.js';
 
 const app = express();
 const httpServer = createServer(app);
@@ -17,6 +18,7 @@ const io = new Server(httpServer, {
 
 const game = new GameManager();
 let cliffGame = null;
+let plinkoGame = null;
 
 // ── Product pre-fetch queue ────────────────────────────────────
 // Keeps products ready so round starts are instant instead of
@@ -120,7 +122,7 @@ io.on('connection', (socket) => {
     if (game.allReady()) {
       game.status = 'loading'; // lock against double-trigger
       if (game.shouldRunMiniGame()) {
-        startCliffHangers();
+        startMiniGame();
       } else {
         startNewRound();
       }
@@ -159,6 +161,36 @@ io.on('connection', (socket) => {
     }
   });
 
+  // ── Plinko ─────────────────────────────────────────────────────
+  socket.on('plinko_drop', ({ startCol }) => {
+    if (!plinkoGame || socket.id !== plinkoGame.winnerId) return;
+    const col = parseInt(startCol, 10);
+    if (isNaN(col) || col < 0 || col >= 9) return;
+
+    const chip = plinkoGame.dropChip(col);
+    if (!chip) return;
+
+    io.emit('plinko_chip', chip);
+
+    if (plinkoGame.isComplete()) {
+      // Wait for animation to finish before sending complete
+      const completionData = plinkoGame.getCompletionData();
+      setTimeout(() => {
+        io.emit('plinko_complete', completionData);
+      }, 3500);
+    }
+  });
+
+  socket.on('plinko_continue', () => {
+    if (!plinkoGame) return;
+    plinkoGame.playerContinue(socket.id);
+
+    if (plinkoGame.allContinued(game.players.size)) {
+      plinkoGame = null;
+      startNewRound();
+    }
+  });
+
   // ── Meta ───────────────────────────────────────────────────────
   socket.on('end_show', () => {
     if (socket.id !== game.hostId) return;
@@ -170,6 +202,7 @@ io.on('connection', (socket) => {
   socket.on('play_again', () => {
     if (socket.id !== game.hostId) return;
     cliffGame = null;
+    plinkoGame = null;
     game.softReset();
     io.emit('game_reset', game.getLobbyState());
   });
@@ -184,6 +217,7 @@ io.on('connection', (socket) => {
     if (game.players.size === 0 && game.status !== 'lobby') {
       clearTimeout(game.roundTimer);
       cliffGame = null;
+      plinkoGame = null;
       game.softReset();
     }
 
@@ -198,7 +232,7 @@ io.on('connection', (socket) => {
     if (game.status === 'revealing' && game.players.size > 0 && game.allReady()) {
       game.status = 'loading';
       if (game.shouldRunMiniGame()) {
-        startCliffHangers();
+        startMiniGame();
       } else {
         startNewRound();
       }
@@ -208,6 +242,13 @@ io.on('connection', (socket) => {
     if (cliffGame && socket.id === cliffGame.winnerId) {
       cliffGame = null;
       io.emit('cliff_skip');
+      startNewRound();
+    }
+
+    // If winner disconnected mid-plinko, skip to next round
+    if (plinkoGame && socket.id === plinkoGame.winnerId) {
+      plinkoGame = null;
+      io.emit('plinko_skip');
       startNewRound();
     }
   });
@@ -282,6 +323,15 @@ function revealRound() {
   io.emit('round_reveal', results);
 }
 
+// ── Mini-game dispatcher — picks randomly between Cliff Hangers and Plinko ──
+function startMiniGame() {
+  if (Math.random() < 0.5) {
+    startCliffHangers();
+  } else {
+    startPlinko();
+  }
+}
+
 async function startCliffHangers() {
   io.emit('cliff_loading');
   try {
@@ -308,6 +358,18 @@ async function startCliffHangers() {
     cliffGame = null;
     startNewRound();
   }
+}
+
+function startPlinko() {
+  plinkoGame = new PlinkoGame(game.lastWinnerId, game.lastWinnerUsername);
+  console.log(`[plinko] starting for ${game.lastWinnerUsername}`);
+  io.emit('plinko_start', {
+    winnerId: game.lastWinnerId,
+    winnerUsername: game.lastWinnerUsername,
+    totalChips: 3,
+    chipsRemaining: 3,
+    slotValues: SLOT_VALUES,
+  });
 }
 
 const PORT = process.env.PORT || 3002;

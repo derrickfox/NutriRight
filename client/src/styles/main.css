@@ -993,6 +993,175 @@ h1, h2, h3, .logo-title, .title-lg, .round-badge, .answer-value {
 }
 
 /* ─────────────────────────────────────────────────────────── */
+/*  PLINKO                                                     */
+/* ─────────────────────────────────────────────────────────── */
+.plinko-screen {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 0.75rem 1rem 2rem;
+  gap: 0.5rem;
+  max-width: 960px;
+  margin: 0 auto;
+}
+
+.plinko-banner { letter-spacing: 0.04em; }
+
+.plinko-subtitle {
+  text-align: center;
+  color: rgba(255,255,255,0.7);
+  font-size: 1rem;
+  margin: 0;
+}
+
+.plinko-body {
+  display: flex;
+  gap: 1.5rem;
+  align-items: flex-start;
+  width: 100%;
+  justify-content: center;
+}
+
+.plinko-board-wrap {
+  flex-shrink: 0;
+  width: min(450px, 100%);
+}
+
+.plinko-svg {
+  width: 100%;
+  height: auto;
+  display: block;
+  filter: drop-shadow(0 0 24px rgba(167,139,250,0.2));
+}
+
+/* Chip landing ring pulse */
+@keyframes ring-pulse {
+  0%   { opacity: 0.7; r: 16; }
+  100% { opacity: 0; r: 30; }
+}
+.chip-land-ring { animation: ring-pulse 0.7s ease-out forwards; }
+
+/* ── Side panel ── */
+.plinko-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-width: 180px;
+  max-width: 220px;
+  padding-top: 0.5rem;
+}
+
+.plinko-chips-row {
+  display: flex;
+  gap: 0.6rem;
+  justify-content: center;
+}
+
+.plinko-chip-dot {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid rgba(255,255,255,0.25);
+}
+.plinko-chip-dot.ready  { background: radial-gradient(circle at 35% 30%, #fff 0%, #FFD700 60%, #FF8C00 100%); box-shadow: 0 0 10px #FFD700aa; }
+.plinko-chip-dot.used   { background: rgba(255,255,255,0.08); }
+
+.plinko-chips-label {
+  text-align: center;
+  font-size: 0.85rem;
+  color: rgba(255,255,255,0.5);
+  margin: 0;
+}
+
+.plinko-last-points {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 10px;
+  padding: 0.6rem 1rem;
+  gap: 0.2rem;
+}
+.plinko-last-label { font-size: 0.72rem; color: rgba(255,255,255,0.45); text-transform: uppercase; letter-spacing: 0.08em; }
+.plinko-last-value { font-family: 'Bangers', cursive; font-size: 2rem; line-height: 1; }
+
+.plinko-total-points {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: rgba(255,215,0,0.08);
+  border: 1px solid rgba(255,215,0,0.3);
+  border-radius: 10px;
+  padding: 0.6rem 1rem;
+  gap: 0.2rem;
+}
+.plinko-total-label { font-size: 0.72rem; color: rgba(255,215,0,0.65); text-transform: uppercase; letter-spacing: 0.08em; }
+.plinko-total-value { font-family: 'Bangers', cursive; font-size: 1.7rem; color: #FFD700; line-height: 1; }
+
+.plinko-aim-hint {
+  background: rgba(255,255,255,0.05);
+  border: 1px dashed rgba(255,255,255,0.2);
+  border-radius: 10px;
+  padding: 0.75rem 1rem;
+  text-align: center;
+  font-size: 0.88rem;
+  color: rgba(255,255,255,0.55);
+  line-height: 1.5;
+}
+.plinko-aim-hint p { margin: 0; }
+
+.plinko-dropping-msg {
+  text-align: center;
+  color: rgba(255,255,255,0.5);
+  font-size: 0.85rem;
+}
+
+.plinko-spectator-msg {
+  background: rgba(255,255,255,0.05);
+  border-radius: 10px;
+  padding: 0.75rem 1rem;
+  text-align: center;
+  font-size: 0.88rem;
+  color: rgba(255,255,255,0.55);
+}
+
+/* ── Complete state ── */
+.plinko-complete {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem;
+  background: rgba(255,215,0,0.07);
+  border: 1px solid rgba(255,215,0,0.25);
+  border-radius: 14px;
+  text-align: center;
+}
+.plinko-complete-icon { font-size: 2.5rem; }
+.plinko-complete-title { font-size: 1.1rem; margin: 0; font-weight: 700; }
+.plinko-complete-score {
+  font-family: 'Bangers', cursive;
+  font-size: 2.6rem;
+  color: #FFD700;
+  line-height: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.1rem;
+}
+.plinko-complete-pts { font-size: 1rem; color: rgba(255,215,0,0.7); }
+.plinko-continue-btn { margin-top: 0.5rem; }
+
+/* ── Responsive ── */
+@media (max-width: 640px) {
+  .plinko-body { flex-direction: column; align-items: center; }
+  .plinko-panel { max-width: 100%; flex-direction: row; flex-wrap: wrap; justify-content: center; }
+  .plinko-chips-row, .plinko-chips-label { width: 100%; }
+}
+
+/* ─────────────────────────────────────────────────────────── */
 /*  SCROLLBAR                                                  */
 /* ─────────────────────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 6px; }
