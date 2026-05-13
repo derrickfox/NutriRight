@@ -108,7 +108,7 @@ function Board({
         fill="rgba(8,0,28,0.82)" stroke="rgba(167,139,250,0.25)" strokeWidth="1.5" />
 
       {/* Left + right wall guides */}
-      <line x1={COL_W / 2} y1={DROP_Y + 16} x1={COL_W / 2} y2={SLOT_Y}
+      <line x1={COL_W / 2} y1={DROP_Y + 16} x2={COL_W / 2} y2={SLOT_Y}
         stroke="rgba(167,139,250,0.15)" strokeWidth="1" strokeDasharray="4 6" />
       <line x1={SVG_W - COL_W / 2} y1={DROP_Y + 16} x2={SVG_W - COL_W / 2} y2={SLOT_Y}
         stroke="rgba(167,139,250,0.15)" strokeWidth="1" strokeDasharray="4 6" />
